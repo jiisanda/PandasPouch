@@ -1,9 +1,11 @@
 // Least Recently Used Implementation for Caching
 
-use std::collections::HashMap;
 use std::fmt::Display;
-use std::sync::{Arc, Mutex};
+use std::hash::Hash;
 use std::time::{Duration, Instant};
+use parking_lot::Mutex;
+use dashmap::DashMap;
+use std::sync::Arc;
 
 pub type Link<K, V> = Option<Arc<Mutex<Node<K, V>>>>;
 
@@ -15,19 +17,19 @@ pub struct Node<K, V> {
     next: Link<K, V>,
 }
 
-pub struct LRUCache<K, V> {
-    map: Arc<Mutex<HashMap<K, Link<K, V>>>>,
+pub struct LRUCache<K: Eq + Hash, V> {
+    map: DashMap<K, Link<K, V>>,
     expires: Duration,
     head: Link<K, V>,
     tail: Link<K, V>,
     capacity: usize,
 }
 
-impl<K: Eq + std::hash::Hash + Clone + Display, V: Clone + Display> LRUCache<K, V> {
+impl<K: Eq + Hash + Clone + Display, V: Clone + Display> LRUCache<K, V> {
     pub fn new(capacity: usize, expires: Option<Duration>) -> LRUCache<K, V> {
-        let expires = expires.unwrap_or(Duration::from_secs(3600)); // default of duration is 3600 seconds (1 hour)
+        let expires = expires.unwrap_or(Duration::from_secs(3600));
         LRUCache {
-            map: Arc::new(Mutex::new(HashMap::new())),
+            map: DashMap::new(),
             expires,
             head: None,
             tail: None,
@@ -35,131 +37,113 @@ impl<K: Eq + std::hash::Hash + Clone + Display, V: Clone + Display> LRUCache<K, 
         }
     }
 
-    pub fn get(&mut self, key: K) -> Option<V> {
-        let map = self.map.lock().unwrap();
-        if let Some(node_link) = map.get(&key).cloned() {
-            drop(map);
-            if let Some(node_ref) = node_link {
-                let node = node_ref.lock().unwrap();
-                if node.expires_at < Instant::now() {
-                    drop(node);
-                    self.remove(key);
-                    return None;
-                }
-                let value = node.value.clone();
-                drop(node);
-                self.move_to_head(node_ref.clone()); // Clone node_ref
-                Some(value)
-            } else {
-                None
-            }
-        } else {
+    pub fn get(&mut self, key: &K) -> Option<V> {
+        let node_ref = self.map.get(key)?.as_ref()?.clone();
+        let node = node_ref.lock();
+        if node.expires_at < Instant::now() {
+            drop(node);
+            self.remove(key.clone());
             None
+        } else {
+            let value = node.value.clone();
+            drop(node);
+            self.move_to_head(node_ref);
+            Some(value)
         }
     }
 
     pub fn put(&mut self, key: K, value: V) {
-        let mut map = self.map.lock().unwrap();
-        let node = match map.get(&key) {
-            Some(Some(node_link)) => {
-                let mut node = node_link.lock().unwrap();
-                node.value = value.clone();
-                Arc::clone(node_link)
-            }
-            Some(None) => panic!("Logic error: Node is None for existing key..."),
-            None => {
-                let new_node = Arc::new(Mutex::new(Node {
-                    key: key.clone(),
-                    value: value.clone(),
-                    expires_at: Instant::now() + self.expires,
-                    prev: None,
-                    next: self.head.clone(),
-                }));
-                if let Some(head) = &self.head {
-                    let mut head = head.lock().unwrap();
-                    head.prev = Some(Arc::clone(&new_node));
-                } else {
-                    self.tail = Some(Arc::clone(&new_node));
-                }
-                self.head = Some(Arc::clone(&new_node));
+        if let Some(node_ref) = self.map.get(&key).and_then(|r| r.value().clone()) {
+            let mut node = node_ref.lock();
+            node.value = value;
+            node.expires_at = Instant::now() + self.expires;
+            drop(node);
+            self.move_to_head(node_ref);
+        } else {
+            let new_node = Arc::new(Mutex::new(Node {
+                key: key.clone(),
+                value,
+                expires_at: Instant::now() + self.expires,
+                prev: None,
+                next: self.head.clone(),
+            }));
 
-                if map.len() >= self.capacity {
-                    if let Some(tail) = self.tail.clone() {
-                        let tail = tail.lock().unwrap();
-                        let prev = tail.prev.clone();
-                        match prev {
-                            Some(ref prev) => {
-                                let mut prev = prev.lock().unwrap();
-                                prev.next = None;
-                            }
-                            None => self.head = None,
-                        }
-                        let key_to_remove = tail.key.clone();
-                        map.remove(&key_to_remove);
-                        self.tail = prev;
+            if let Some(head) = &self.head {
+                let mut head = head.lock();
+                head.prev = Some(Arc::clone(&new_node));
+            } else {
+                self.tail = Some(Arc::clone(&new_node));
+            }
+            self.head = Some(Arc::clone(&new_node));
+
+            if self.map.len() >= self.capacity {
+                if let Some(tail) = self.tail.clone() {
+                    let tail = tail.lock();
+                    let prev = tail.prev.clone();
+                    let key_to_remove = tail.key.clone();
+                    drop(tail);
+                    self.map.remove(&key_to_remove);
+                    self.tail = prev;
+                    if let Some(new_tail) = &self.tail {
+                        new_tail.lock().next = None;
                     }
                 }
-                map.insert(key.clone(), Some(Arc::clone(&new_node)));
-                new_node
             }
-        };
-        drop(map); // Release lock before mutable borrow
-        self.move_to_head(node);
+
+            self.map.insert(key, Some(new_node));
+        }
     }
 
     pub fn print(&mut self) -> Vec<(K, V)> {
-        let map = self.map.lock().unwrap();
         let mut current = self.head.clone();
         let mut get_all = Vec::new();
-        drop(map); // Release lock before mutable borrow
         while let Some(node) = current {
-            let node = node.lock().unwrap();
-            let key = node.key.clone();
-            if node.expires_at < Instant::now() {
+            let node_lock = node.lock();
+            let key = node_lock.key.clone();
+            let value = node_lock.value.clone();
+            let expires_at = node_lock.expires_at;
+            
+            current = node_lock.next.clone();
+            drop(node_lock);
+
+            if expires_at < Instant::now() {
                 self.remove(key);
             } else {
-                get_all.push((key, node.value.clone()));
+                get_all.push((key, value));
             }
-            current = node.next.clone();
         }
         get_all
     }
 
     fn detach_node(&mut self, node_ref: Arc<Mutex<Node<K, V>>>) {
-        let prev;
-        {
-            // let map = self.map.lock().unwrap();
-            let node = node_ref.lock().unwrap();
-            prev = node.prev.clone();
-        }
+        let mut node = node_ref.lock();
+        let prev = node.prev.clone();
+        let next = node.next.clone();
+
         if let Some(prev_node_ref) = &prev {
-            let mut prev_node = prev_node_ref.lock().unwrap();
-            prev_node.next = node_ref.lock().unwrap().next.clone();
+            prev_node_ref.lock().next = next.clone();
         } else {
             // node is head of LRUCache DLL, update the head
-            self.head = node_ref.lock().unwrap().next.clone();
+            self.head = next.clone();
         }
 
-        if let Some(next_node_ref) = &node_ref.lock().unwrap().next {
-            let mut next_node = next_node_ref.lock().unwrap();
-            next_node.prev = prev.clone();
+        if let Some(next_node_ref) = &next {
+            next_node_ref.lock().prev = prev;
         } else {
             // node is in tail, update tail
-            self.tail = prev.clone();
+            self.tail = prev;
         }
+
+        node.prev = None;
+        node.next = None;
     }
 
     fn remove(&mut self, key: K) -> Option<(K, V)> {
-        let node_link = {
-            let mut map = self.map.lock().unwrap();
-            map.remove(&key)
-        };
-
-        if let Some(node_link) = node_link {
-            if let Some(node_ref) = node_link.clone() {
+        if let Some((_, node_link)) = self.map.remove(&key) {
+            if let Some(node_ref) = node_link {
                 // unlink/detaching node from DLL
                 self.detach_node(node_ref.clone());
-                let node = node_ref.lock().unwrap();
+                let node = node_ref.lock();
                 return Some((node.key.clone(), node.value.clone()));
             }
         }
@@ -171,16 +155,28 @@ impl<K: Eq + std::hash::Hash + Clone + Display, V: Clone + Display> LRUCache<K, 
         self.detach_node(node_ref.clone());
 
         // inserting at head
+        let mut node = node_ref.lock();
+        node.next = self.head.clone();
+        node.prev = None;
+        drop(node);
+
         if let Some(head_ref) = &self.head {
-            let mut head = head_ref.lock().unwrap();
-            head.prev = Some(node_ref.clone());
-            let mut node = node_ref.lock().unwrap();
-            node.next = Some(head_ref.clone());
+            head_ref.lock().prev = Some(node_ref.clone());
         } else {
             // DLL is empty, both head and tail to the node
             self.tail = Some(node_ref.clone());
         }
 
         self.head = Some(node_ref);
+    }
+}
+
+impl<K: Eq + Hash, V> Drop for LRUCache<K, V> {
+    fn drop(&mut self) {
+        // Clear the map to break potential circular references
+        self.map.clear();
+        // Set head and tail to None to break the linked list
+        self.head = None;
+        self.tail = None;
     }
 }
