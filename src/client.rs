@@ -1,29 +1,39 @@
-use crate::lru::LRUCache;
-use std::fmt::Display;
-use std::hash::Hash;
-use std::time::Duration;
+use tonic::transport::Channel;
 
-pub struct Client<K: Eq + Hash, V> {
-    cache: LRUCache<K, V>,
+use pandas_pouch::pandas_pouch_cache_service_client::PandasPouchCacheServiceClient;
+use pandas_pouch::{GetRequest, PutRequest};
+
+pub mod pandas_pouch {
+    tonic::include_proto!("pandas_pouch");
 }
 
-impl<K: Eq + std::hash::Hash + Clone + Display, V: Clone + Display> Client<K, V> {
-    pub fn new(
-        _host: &str,
-        _port: u16,
-        capacity: usize,
-        expires: Option<Duration>,
-    ) -> Client<K, V> {
-        // todo! : to use host and port to connect to a remote server
-        let cache = LRUCache::new(capacity, expires);
-        Client { cache }
+#[warn( dead_code)]
+pub struct Client {
+    client: PandasPouchCacheServiceClient<Channel>,
+}
+
+#[warn(dead_code)]
+impl Client {
+    pub async fn new(host: &str, port: u16) -> Result<Self, Box<dyn std::error::Error>> {
+        let addr = format!("http://{}:{}", host, port);
+        let channel = Channel::from_shared(addr)?.connect().await?;
+        let client = PandasPouchCacheServiceClient::new(channel);
+        Ok(Client { client })
     }
 
-    pub fn get(&mut self, key: K) -> Option<V> {
-        self.cache.get(&key)
+    pub async fn get(&mut self, key: String) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        let request = tonic::Request::new(GetRequest { key });
+        let response = self.client.get(request).await?.into_inner();
+        if response.found {
+            Ok(Some(response.value))
+        } else {
+            Ok(None)
+        }
     }
 
-    pub fn put(&mut self, key: K, value: V) {
-        self.cache.put(key, value);
+    pub async fn put(&mut self, key: String, value: String) -> Result<bool, Box<dyn std::error::Error>> {
+        let request = tonic::Request::new(PutRequest { key, value });
+        let response = self.client.put(request).await?.into_inner();
+        Ok(response.success)
     }
 }
