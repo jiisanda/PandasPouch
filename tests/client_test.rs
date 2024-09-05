@@ -16,7 +16,7 @@ async fn test_server_client() {
     client.put("test_key".to_string(), "test_value".to_string()).await.unwrap();
     let value = client.get("test_key".to_string()).await.unwrap();
     assert_eq!(value, Some("test_value".to_string()));
-    
+
     let value = client.get("non_existent_key".to_string()).await.unwrap();
     assert_eq!(value, None);
 }

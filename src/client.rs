@@ -7,12 +7,10 @@ pub mod pandas_pouch {
     tonic::include_proto!("pandas_pouch");
 }
 
-#[warn( dead_code)]
 pub struct Client {
     client: PandasPouchCacheServiceClient<Channel>,
 }
 
-#[warn(dead_code)]
 impl Client {
     pub async fn new(host: &str, port: u16) -> Result<Self, Box<dyn std::error::Error>> {
         let addr = format!("http://{}:{}", host, port);
