@@ -10,19 +10,19 @@ mod tests {
         let mut cache = LRUCache::new(2, None); // default expiration of 3600 seconds
 
         cache.put(1, "a");
-        assert_eq!(cache.get(1), Some("a"));
+        assert_eq!(cache.get(&1), Some("a"));
         cache.put(2, "b");
-        assert_eq!(cache.get(2), Some("b"));
+        assert_eq!(cache.get(&2), Some("b"));
 
         cache.put(3, "c");
-        assert_eq!(cache.get(1), None);
-        assert_eq!(cache.get(2), Some("b"));
-        assert_eq!(cache.get(3), Some("c"));
+        assert_eq!(cache.get(&1), None);
+        assert_eq!(cache.get(&2), Some("b"));
+        assert_eq!(cache.get(&3), Some("c"));
 
         cache.put(4, "d");
-        assert_eq!(cache.get(2), None);
-        assert_eq!(cache.get(3), Some("c"));
-        assert_eq!(cache.get(4), Some("d"));
+        assert_eq!(cache.get(&2), None);
+        assert_eq!(cache.get(&3), Some("c"));
+        assert_eq!(cache.get(&4), Some("d"));
     }
 
     #[test]
@@ -30,13 +30,13 @@ mod tests {
         let mut cache = LRUCache::new(2, Some(Duration::from_secs(2)));
 
         cache.put(1, "a");
-        assert_eq!(cache.get(1), Some("a"));
+        assert_eq!(cache.get(&1), Some("a"));
         cache.put(2, "b");
-        assert_eq!(cache.get(2), Some("b"));
+        assert_eq!(cache.get(&2), Some("b"));
 
         thread::sleep(Duration::from_secs(5));
-        assert_eq!(cache.get(1), None);
-        assert_eq!(cache.get(2), None);
+        assert_eq!(cache.get(&1), None);
+        assert_eq!(cache.get(&2), None);
     }
     
     #[test]
@@ -51,7 +51,7 @@ mod tests {
             let handle = thread::spawn(move || {
                 let mut cache = cache_clone.lock().unwrap();
                 cache.put(i, i*2);
-                assert_eq!(cache.get(i), Some(i*2));
+                assert_eq!(cache.get(&i), Some(i*2));
             });
             handles.push(handle);
         }
@@ -63,7 +63,7 @@ mod tests {
         // check that all values are still correct after all threads have finished
         for i in 1..0 {
             let mut cache = cache.lock().unwrap();
-            assert_eq!(cache.get(i), Some(i*2));
+            assert_eq!(cache.get(&i), Some(i*2));
         }
     }
 }
