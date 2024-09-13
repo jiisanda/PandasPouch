@@ -5,7 +5,7 @@ use tonic::{Request, Response, Status};
 use tonic::transport::Server;
 
 use pandas_pouch::pandas_pouch_cache_service_server::{PandasPouchCacheService, PandasPouchCacheServiceServer};
-use pandas_pouch::{GetRequest, GetResponse, PutRequest, PutResponse};
+use pandas_pouch::{GetRequest, GetResponse, PutRequest, PutResponse, PrintAllRequest, PrintAllResponse, KeyValuePair};
 use crate::db::Database;
 use crate::lru::LRUCache;
 
@@ -62,6 +62,16 @@ impl PandasPouchCacheService for CacheServiceImpl {
             Ok(_) => Ok(Response::new(PutResponse { success: true })),
             Err(e) => Err(Status::internal(format!("Database error:  {}", e))),
         }
+    }
+
+    async fn print_all(&self, _request: Request<PrintAllRequest>) -> Result<Response<PrintAllResponse>, Status> {
+        let mut cache = self.cache.lock().await;
+        let pairs = cache.print().into_iter().map(|(k, v)| KeyValuePair {
+            key: k,
+            value: v,
+        }).collect::<Vec<_>>();
+
+        Ok(Response::new(PrintAllResponse { pairs }))
     }
 }
 

@@ -4,6 +4,7 @@ package pandas_pouch;
 service PandasPouchCacheService {
   rpc Get (GetRequest) returns (GetResponse);
   rpc Put (PutRequest) returns (PutResponse);
+  rpc PrintAll (PrintAllRequest) returns (PrintAllResponse);
 }
 
 message GetRequest {
@@ -22,4 +23,16 @@ message PutRequest {
 
 message PutResponse {
   bool success = 1;
+}
+
+message PrintAllRequest {
+}
+
+message PrintAllResponse {
+  repeated KeyValuePair pairs = 1;
+}
+
+message KeyValuePair {
+  string key = 1;
+  string value = 2;
 }
