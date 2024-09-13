@@ -94,6 +94,7 @@ impl<K: Eq + Hash + Clone + Display, V: Clone + Display> LRUCache<K, V> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn print(&mut self) -> Vec<(K, V)> {
         let mut current = self.head.clone();
         let mut get_all = Vec::new();

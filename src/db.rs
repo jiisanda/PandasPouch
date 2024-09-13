@@ -2,7 +2,6 @@ use sqlx::postgres::{PgPool, PgPoolOptions};
 
 pub struct Database {
     pool: PgPool,
-    pub database_url: String,
 }
 
 impl Database {
@@ -14,7 +13,6 @@ impl Database {
 
         Ok(Database {
             pool,
-            database_url: database_url.to_string(),
         })
     }
 
