@@ -22,6 +22,7 @@ pub struct DatabaseSettings {
 impl Settings {
     pub fn new() -> Result<Self, ConfigError> {
         let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "development".into());
+        info!("Run mode: {}", run_mode);
 
         let s = Config::builder()
             .add_source(File::with_name("config/default"))
@@ -29,6 +30,8 @@ impl Settings {
             .add_source(File::with_name("config/local").required(false))
             .add_source(Environment::with_prefix("APP"))
             .build()?;
+
+        info!("Configuration build successfully!");
 
         let settings: Settings = s.try_deserialize()?;
         env::set_var("RUST_LOG", &settings.rust_log);
