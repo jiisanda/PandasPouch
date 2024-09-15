@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 use dashmap::DashMap;
 use std::sync::Arc;
+use log::{debug, info, warn};
 
 pub type Link<K, V> = Option<Arc<Mutex<Node<K, V>>>>;
 
@@ -28,6 +29,7 @@ pub struct LRUCache<K: Eq + Hash, V> {
 impl<K: Eq + Hash + Clone + Display, V: Clone + Display> LRUCache<K, V> {
     pub fn new(capacity: usize, expires: Option<Duration>) -> LRUCache<K, V> {
         let expires = expires.unwrap_or(Duration::from_secs(3600));
+        info!("Adding new element to panda's pouch with capacity {} and expiry {:?}", capacity, expires);
         LRUCache {
             map: DashMap::new(),
             expires,
@@ -38,9 +40,11 @@ impl<K: Eq + Hash + Clone + Display, V: Clone + Display> LRUCache<K, V> {
     }
 
     pub fn get(&mut self, key: &K) -> Option<V> {
+        info!("Trying to get cache value for key: {}", key);
         let node_ref = self.map.get(key)?.as_ref()?.clone();
         let node = node_ref.lock();
         if node.expires_at < Instant::now() {
+            warn!("Cache entry for key {} has expired", key);
             drop(node);
             self.remove(key.clone());
             None
@@ -48,17 +52,20 @@ impl<K: Eq + Hash + Clone + Display, V: Clone + Display> LRUCache<K, V> {
             let value = node.value.clone();
             drop(node);
             self.move_to_head(node_ref);
+            debug!("Cache hit for key: {}", key);
             Some(value)
         }
     }
 
     pub fn put(&mut self, key: K, value: V) {
+        info!("Adding the {key}:{value} to the cache");
         if let Some(node_ref) = self.map.get(&key).and_then(|r| r.value().clone()) {
             let mut node = node_ref.lock();
             node.value = value;
             node.expires_at = Instant::now() + self.expires;
             drop(node);
             self.move_to_head(node_ref);
+            debug!("Updated existing entry for key: {}", key);
         } else {
             let new_node = Arc::new(Mutex::new(Node {
                 key: key.clone(),
@@ -76,7 +83,9 @@ impl<K: Eq + Hash + Clone + Display, V: Clone + Display> LRUCache<K, V> {
             }
             self.head = Some(Arc::clone(&new_node));
 
+            debug!("Added new entry to the pouch with key: {}", key);
             if self.map.len() >= self.capacity {
+                warn!("Panda's pouch is full. Removing least recently used item.");
                 if let Some(tail) = self.tail.clone() {
                     let tail = tail.lock();
                     let prev = tail.prev.clone();
@@ -95,6 +104,7 @@ impl<K: Eq + Hash + Clone + Display, V: Clone + Display> LRUCache<K, V> {
     }
 
     pub fn print(&mut self) -> Vec<(K, V)> {
+        info!("Printing all elements from pouch.");
         let mut current = self.head.clone();
         let mut get_all = Vec::new();
         while let Some(node) = current {
@@ -107,11 +117,14 @@ impl<K: Eq + Hash + Clone + Display, V: Clone + Display> LRUCache<K, V> {
             drop(node_lock);
 
             if expires_at < Instant::now() {
+                warn!("Removing expired entries from key: {}", key);
                 self.remove(key);
             } else {
+                debug!("Valid entry: {} -> {}", key, value);
                 get_all.push((key, value));
             }
         }
+        info!("Total valid entries from pouch: {}", get_all.len());
         get_all
     }
 

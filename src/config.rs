@@ -1,5 +1,6 @@
 use std::env;
 use config::{Config, ConfigError, Environment, File};
+use log::info;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -7,10 +8,12 @@ pub struct Settings {
     pub local_addr: String,
     pub local_port: u16,
     pub database: DatabaseSettings,
+    pub rust_log: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct DatabaseSettings {
+    pub host: String,
     pub username: String,
     pub password: String,
     pub name: String,
@@ -27,16 +30,18 @@ impl Settings {
             .add_source(Environment::with_prefix("APP"))
             .build()?;
 
-        println!("debug: {:?}", s.get_bool("debug"));
-        println!("database: {:?}", s.get::<String>("database.url"));
+        let settings: Settings = s.try_deserialize()?;
+        env::set_var("RUST_LOG", &settings.rust_log);
 
-        s.try_deserialize()
+        info!("connected to database: {:?}", settings.database_url());
+        
+        Ok(settings)
     }
 
     pub fn database_url(&self) -> String {
         format!(
-            "postgres://{}:{}@localhost/{}",
-            self.database.username, self.database.password, self.database.name
+            "postgres://{}:{}@{}/{}",
+            self.database.username, self.database.password, self.database.host, self.database.name
         )
     }
 }
