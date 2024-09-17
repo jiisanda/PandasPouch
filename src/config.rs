@@ -25,9 +25,9 @@ impl Settings {
         info!("Run mode: {}", run_mode);
 
         let s = Config::builder()
-            .add_source(File::with_name("config/default"))
-            .add_source(File::with_name(&format!("config/{}", run_mode)).required(false))
-            .add_source(File::with_name("config/local").required(false))
+            .add_source(File::with_name("config/default.toml"))
+            .add_source(File::with_name(&format!("config/{}.toml", run_mode)).required(false))
+            .add_source(File::with_name("config/local.toml").required(false))
             .add_source(Environment::with_prefix("APP"))
             .build()?;
 
@@ -42,9 +42,11 @@ impl Settings {
     }
 
     pub fn database_url(&self) -> String {
-        format!(
-            "postgres://{}:{}@{}/{}",
+        let url = format!(
+            "postgresql://{}:{}@{}/{}",
             self.database.username, self.database.password, self.database.host, self.database.name
-        )
+        );
+        log::debug!("Database URL: {}", url);
+        url
     }
 }
