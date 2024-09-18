@@ -7,18 +7,13 @@ A Distributed Caching Service with Rust 🦀🦀.
 
 ## Progress
 
-- [x] Basic Cache
-- [x] LRU Cache
-  - [x] LRU Cache with TTL
-  - [x] LRU Cache with Size
-  - [x] LRU Cache with Size and TTL
-  - [x] print cache
-  - [x] Thread Safety
-- [x] Database Setup
-- [x] API Integration
-- [x] Docker Setup
-- [ ] Consistent Hashing
-- [ ] Distributed Cache - Dedicated cache cluster
+- ✅ Basic Cache
+- ✅ LRU Cache
+- ✅ Database Setup
+- ✅ API Integration
+- ✅ Docker Setup
+- 🟡 Consistent Hashing
+- 🟡 Distributed Cache - Dedicated cache cluster
 
 ## Pre-requisites
 
