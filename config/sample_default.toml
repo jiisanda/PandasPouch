@@ -1,0 +1,10 @@
+local_addr = "0.0.0.0"
+local_port = 5001
+rust_log = "debug"
+debug = true
+
+[database]
+host = "db"
+username = ""       # Add db username
+password = ""       # Add db password
+name = "pandasdb"
