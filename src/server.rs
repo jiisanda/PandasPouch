@@ -2,11 +2,23 @@ use std::sync::Arc;
 use std::string::String;
 use log::{debug, error, info};
 use tokio::sync::Mutex;
-use tonic::{Request, Response, Status};
+use tonic::{async_trait, Request, Response, Status};
 use tonic::transport::Server;
 
 use pandas_pouch::pandas_pouch_cache_service_server::{PandasPouchCacheService, PandasPouchCacheServiceServer};
-use pandas_pouch::{GetRequest, GetResponse, PutRequest, PutResponse, PrintAllRequest, PrintAllResponse, KeyValuePair};
+use pandas_pouch::{
+    GetRequest, 
+    GetResponse, 
+    PutRequest, 
+    PutResponse, 
+    PrintAllRequest, 
+    PrintAllResponse, 
+    KeyValuePair,
+    JoinClusterRequest,
+    JoinClusterResponse,
+    LeaveClusterRequest,
+    LeaveClusterResponse,
+};
 use crate::db::Database;
 use crate::lru::LRUCache;
 
@@ -19,7 +31,7 @@ pub struct CacheServiceImpl {
     db: Arc<Database>,
 }
 
-#[tonic::async_trait]
+#[async_trait]
 impl PandasPouchCacheService for CacheServiceImpl {
     async fn get(&self, request: Request<GetRequest>) -> Result<Response<GetResponse>, Status> {
         let key = request.into_inner().key;
@@ -95,6 +107,22 @@ impl PandasPouchCacheService for CacheServiceImpl {
 
         info!("Returning {} cache entries", pairs.len());
         Ok(Response::new(PrintAllResponse { pairs }))
+    }
+
+    async fn forward_get(&self, _request: Request<GetRequest>) -> Result<Response<GetResponse>, Status> {
+        Err(Status::unimplemented("Not implemented"))
+    }
+
+    async fn forward_put(&self, _request: Request<PutRequest>) -> Result<Response<PutResponse>, Status> {
+        Err(Status::unimplemented("Not implemented"))
+    }
+
+    async fn join_cluster(&self, _request: Request<JoinClusterRequest>) -> Result<Response<JoinClusterResponse>, Status> {
+        Err(Status::unimplemented("Not implemented"))
+    }
+
+    async fn leave_cluster(&self, _request: Request<LeaveClusterRequest>) -> Result<Response<LeaveClusterResponse>, Status> {
+        Err(Status::unimplemented("Not implemented"))
     }
 }
 
