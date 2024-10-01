@@ -5,6 +5,11 @@ service PandasPouchCacheService {
   rpc Get (GetRequest) returns (GetResponse);
   rpc Put (PutRequest) returns (PutResponse);
   rpc PrintAll (PrintAllRequest) returns (PrintAllResponse);
+
+  rpc ForwardGet (GetRequest) returns (GetResponse);
+  rpc ForwardPut (PutRequest) returns (PutResponse);
+  rpc JoinCluster (JoinClusterRequest) returns (JoinClusterResponse);
+  rpc LeaveCluster (LeaveClusterRequest) returns (LeaveClusterResponse);
 }
 
 message GetRequest {
@@ -35,4 +40,26 @@ message PrintAllResponse {
 message KeyValuePair {
   string key = 1;
   string value = 2;
+}
+
+message NodeInfo {
+  string host = 1;
+  int32 port = 2;
+}
+
+message JoinClusterRequest {
+  NodeInfo joining_node = 1;
+}
+
+message JoinClusterResponse {
+  bool success = 1;
+  repeated NodeInfo current_nodes = 2;
+}
+
+message LeaveClusterRequest {
+  NodeInfo leaving_node = 1;
+}
+
+message LeaveClusterResponse {
+  bool success = 1;
 }

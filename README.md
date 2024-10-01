@@ -54,17 +54,17 @@ Run the following command to interact with the service.
 
 1. Put operation
 ```bash
-grpcurl -plaintext -proto proto/cache.proto -d '{"key": "key2", "value": "value2"}' 0.0.0.0:50051 pandas_pouch.PandasPouchCacheService/Put
+grpcurl -plaintext -proto proto/pandas_pouch.proto -d '{"key": "key2", "value": "value2"}' 0.0.0.0:50051 pandas_pouch.PandasPouchCacheService/Put
 ```
 
 2. Get Operation
 ```bash
-grpcurl -plaintext -proto proto/cache.proto -d '{"key": "key2"}' 0.0.0.0:50051 pandas_pouch.PandasPouchCacheService/Get
+grpcurl -plaintext -proto proto/pandas_pouch.proto -d '{"key": "key2"}' 0.0.0.0:50051 pandas_pouch.PandasPouchCacheService/Get
 ```
 
 3. PrintAll Operation
 ```bash
-grpcurl -plaintext -proto proto/cache.proto 0.0.0.0:50051 pandas_pouch.PandasPouchCacheService/PrintAll
+grpcurl -plaintext -proto proto/pandas_pouch.proto 0.0.0.0:50051 pandas_pouch.PandasPouchCacheService/PrintAll
 ```
 
 ### pandas-pouch as a crate
