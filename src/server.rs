@@ -5,19 +5,24 @@ use tokio::sync::Mutex;
 use tonic::{async_trait, Request, Response, Status};
 use tonic::transport::Server;
 
-use pandas_pouch::pandas_pouch_cache_service_server::{PandasPouchCacheService, PandasPouchCacheServiceServer};
+use pandas_pouch::pandas_pouch_cache_service_server::{
+    PandasPouchCacheService,
+    PandasPouchCacheServiceServer,
+};
+use pandas_pouch::pandas_pouch_cache_service_client::PandasPouchCacheServiceClient;
 use pandas_pouch::{
-    GetRequest, 
-    GetResponse, 
-    PutRequest, 
-    PutResponse, 
-    PrintAllRequest, 
-    PrintAllResponse, 
+    GetRequest,
+    GetResponse,
+    PutRequest,
+    PutResponse,
+    PrintAllRequest,
+    PrintAllResponse,
     KeyValuePair,
     JoinClusterRequest,
     JoinClusterResponse,
     LeaveClusterRequest,
     LeaveClusterResponse,
+    NodeInfo,
 };
 use crate::db::Database;
 use crate::lru::LRUCache;
@@ -29,6 +34,7 @@ pub mod pandas_pouch {
 pub struct CacheServiceImpl {
     cache: Arc<Mutex<LRUCache<String, String>>>,
     db: Arc<Database>,
+    nodes: Arc<Mutex<Vec<NodeInfo>>>,
 }
 
 #[async_trait]
@@ -109,20 +115,77 @@ impl PandasPouchCacheService for CacheServiceImpl {
         Ok(Response::new(PrintAllResponse { pairs }))
     }
 
-    async fn forward_get(&self, _request: Request<GetRequest>) -> Result<Response<GetResponse>, Status> {
-        Err(Status::unimplemented("Not implemented"))
+    async fn forward_get(&self, request: Request<GetRequest>) -> Result<Response<GetResponse>, Status> {
+        let key = request.into_inner().key;
+        info!("Forwarding GET request for key: {}", key);
+
+        // forward request to another node in cluster
+        let node = self.get_next_node().await?;
+        let mut client = PandasPouchCacheServiceClient::connect(node).await.map_err(|e| {
+            error!("Failed to connect to node: {}", e);
+            Status::internal("Failed to connect to node")
+        })?;
+
+        client.get(Request::new(GetRequest { key })).await.map_err(|e| {
+            error!("Failed to forward GET request: {}", e);
+            Status::internal("Failed to forward GET request")
+        })
     }
 
-    async fn forward_put(&self, _request: Request<PutRequest>) -> Result<Response<PutResponse>, Status> {
-        Err(Status::unimplemented("Not implemented"))
+    async fn forward_put(&self, request: Request<PutRequest>) -> Result<Response<PutResponse>, Status> {
+        let req = request.into_inner();
+        info!("Forwarding PUT request for key: {}", req.key);
+
+        // forward request to another node in cluster
+        let node = self.get_next_node().await?;
+        let mut client = PandasPouchCacheServiceClient::connect(node).await.map_err(|e| {
+            error!("Failed to connect to node: {}", e);
+            Status::internal("Failed to connect to node")
+        })?;
+
+        client.put(Request::new(PutRequest { key: req.key, value: req.value })).await.map_err(|e| {
+            error!("Failed to forward PUT request: {}", e);
+            Status::internal("Failed to forward PUT request")
+        })
     }
 
-    async fn join_cluster(&self, _request: Request<JoinClusterRequest>) -> Result<Response<JoinClusterResponse>, Status> {
-        Err(Status::unimplemented("Not implemented"))
+    async fn join_cluster(&self, request: Request<JoinClusterRequest>) -> Result<Response<JoinClusterResponse>, Status> {
+        let node_info = request.into_inner().joining_node;
+        info!("Node joining cluster: {:?}", node_info);
+
+        // add joining node to cluster
+        let mut nodes = self.nodes.lock().await;
+        nodes.push(node_info.expect("NodeInfo should not be None"));
+
+        Ok(Response::new(JoinClusterResponse {
+            success: true,
+            current_nodes: nodes.clone(),
+        }))
     }
 
-    async fn leave_cluster(&self, _request: Request<LeaveClusterRequest>) -> Result<Response<LeaveClusterResponse>, Status> {
-        Err(Status::unimplemented("Not implemented"))
+    async fn leave_cluster(&self, request: Request<LeaveClusterRequest>) -> Result<Response<LeaveClusterResponse>, Status> {
+        let node_info = request.into_inner().leaving_node;
+        info!("Node leaving cluster: {:?}", node_info);
+
+        // remove the leaving node from cluster
+        let mut nodes = self.nodes.lock().await;
+        nodes.retain(|node| node != node_info.as_ref().expect("NodeInfo should not be None"));
+
+        Ok(Response::new(LeaveClusterResponse {
+            success: true,
+        }))
+    }
+}
+
+impl CacheServiceImpl {
+    async fn get_next_node(&self) -> Result<String, Status> {
+        let nodes = self.nodes.lock().await;
+        if nodes.is_empty() {
+            return Err(Status::internal("No nodes available in the cluster"));
+        }
+
+        // for now, returning the first node, will integrate with hash_ring
+        Ok(format!("http://{}:{}", nodes[0].host, nodes[0].port))
     }
 }
 
@@ -130,11 +193,12 @@ pub async fn run_server(addr: &str, database_url: &str) -> Result<(), Box<dyn st
     info!("Initializing server with address: {}", addr);
     let cache = Arc::new(Mutex::new(LRUCache::new(10, None)));          // keeping capacity 10 for now
     let db: Arc<Database> = Arc::new(Database::new(database_url).await?);
+    let nodes = Arc::new(Mutex::new(Vec::new()));           // list of nodes in the cluster
 
     db.create_table_if_not_exists().await?;
     info!("Database table created or verified");
 
-    let service = CacheServiceImpl { cache, db };
+    let service = CacheServiceImpl { cache, db, nodes };
 
     info!("Starting server on {}", addr);
     Server::builder()
