@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::string::String;
+use std::fmt;
 use log::{debug, error, info};
 use tokio::sync::Mutex;
 use tonic::{async_trait, Request, Response, Status};
@@ -25,15 +26,26 @@ use pandas_pouch::{
     NodeInfo,
 };
 use crate::db::Database;
+use crate::hash_ring::{HashRing, RingNodeInfo};
 use crate::lru::LRUCache;
 
 pub mod pandas_pouch {
     tonic::include_proto!("pandas_pouch");
+
+    use super::fmt;
+
+    impl fmt::Display for NodeInfo {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}:{}", self.host, self.port)
+        }
+    }
 }
 
 pub struct CacheServiceImpl {
     cache: Arc<Mutex<LRUCache<String, String>>>,
     db: Arc<Database>,
+    hash_ring: Arc<Mutex<HashRing<RingNodeInfo>>>,
+    curr_node: RingNodeInfo,
     nodes: Arc<Mutex<Vec<NodeInfo>>>,
 }
 
@@ -43,61 +55,87 @@ impl PandasPouchCacheService for CacheServiceImpl {
         let key = request.into_inner().key;
         info!("GET: key: {}", key);
 
-        // getting the key, from the in-memory cache
-        let mut cache = self.cache.lock().await;
-        if let Some(value) = cache.get(&key) {
-            debug!("Cache hit for key: {}", key);
-            return Ok(Response::new(GetResponse {
-                found: true,
-                value,
-            }));
-        }
+        let hash_ring = self.hash_ring.lock().await;
+        let node = hash_ring.get_node(key.clone()).ok_or(Status::not_found("Node not found"))?;
 
-        // if not in the memory, trying to get in the database
-        debug!("Cache miss for key: {}", key);
-        match self.db.get(&key).await {
-            Ok(Some(value)) => {
-                // updating the in-memory cache
-                debug!("Found value in database for key: {}", key);
-                cache.put(key.clone(), value.clone());
-                Ok(Response::new(GetResponse {
+        // check if curr_node is responsible, if yes get value form cache
+        if node.host == self.curr_node.host && node.port == self.curr_node.port {
+            let mut cache = self.cache.lock().await;
+            if let Some(value) = cache.get(&key) {
+                debug!("Cache hit for key: {}", key);
+                return Ok(Response::new(GetResponse {
                     found: true,
                     value,
-                }))
-            },
-            Ok(None) => {
-                info!("Key not found in cache or database: {}", key);
-                Ok(Response::new(GetResponse {
-                    found: false,
-                    value: String::new(),
-                }))
-            },
-            Err(e) => {
-                error!("Database error while getting key {}: {}", key, e);
-                Err(Status::internal(format!("Database error: {}", e)))
-            },
+                }));
+            }
+
+            // if not in the cache, trying to get in the database
+            debug!("Cache miss for key: {}", key);
+            match self.db.get(&key).await {
+                Ok(Some(value)) => {
+                    // updating the in-memory cache
+                    debug!("Found value in database for key: {}", key);
+                    cache.put(key.clone(), value.clone());
+                    return Ok(Response::new(GetResponse {
+                        found: true,
+                        value,
+                    }));
+                },
+                Ok(None) => {
+                    info!("Key not found in cache or database: {}", key);
+                    return Ok(Response::new(GetResponse {
+                        found: false,
+                        value: String::new(),
+                    }));
+                },
+                Err(e) => {
+                    error!("Database error while getting key {}: {}", key, e);
+                    return Err(Status::internal(format!("Database error: {}", e)));
+                },
+            }
         }
+
+        // forward request to appropriate node
+        let mut client = PandasPouchCacheServiceClient::connect(format!("http://{}:{}", node.host, node.port))
+            .await
+            .map_err(|e| Status::internal(format!("Failed to connect to node: {}", e)))?;
+        let response = client.get(Request::new(GetRequest { key })).await?;
+        Ok(response)
     }
 
     async fn put(&self, request: Request<PutRequest>) -> Result<Response<PutResponse>, Status> {
         let req = request.into_inner();
         info!("PUT: {}", req.key);
 
-        // update the in-memory cache
-        let mut cache = self.cache.lock().await;
-        cache.put(req.key.clone(), req.value.clone());
+        let hash_ring = self.hash_ring.lock().await;
+        let node = hash_ring.get_node(req.key.clone()).ok_or(Status::not_found("Node not found"))?;
 
-        // updating the database
-        match self.db.put(&req.key, &req.value).await {
-            Ok(_) => {
-                debug!("Successfully put key-value pair in cache and database");
-                Ok(Response::new(PutResponse { success: true })) 
-            },
-            Err(e) => {
-                error!("Database error while putting key {}: {}", req.key, e);
-                Err(Status::internal(format!("Database error:  {}", e))) 
-            },
+        // check if curr_node is responsible, if yes put the value in the cache and database
+        if node.host == self.curr_node.host && node.port == self.curr_node.port {
+            let mut cache = self.cache.lock().await;
+            cache.put(req.key.clone(), req.value.clone());
+
+            match self.db.put(&req.key, &req.value).await {
+                Ok(_) => {
+                    debug!("Successfully put key-value pair in cache and database");
+                    return Ok(Response::new(PutResponse { success: true }));
+                },
+                Err(e) => {
+                    error!("Database error while putting key {}: {}", req.key, e);
+                    return Err(Status::internal(format!("Database error:  {}", e)));
+                },
+            };
         }
+
+        // forward the request to appropriate node
+        let mut client = PandasPouchCacheServiceClient::connect(format!("http://{}:{}", node.host, node.port))
+            .await
+            .map_err(|e| Status::internal(format!("Failed to connect to node: {}", e)))?;
+        let response = client.put(Request::new(PutRequest {
+            key: req.key,
+            value: req.value,
+        })).await?;
+        Ok(response)
     }
 
     async fn print_all(&self, _request: Request<PrintAllRequest>) -> Result<Response<PrintAllResponse>, Status> {
@@ -120,7 +158,7 @@ impl PandasPouchCacheService for CacheServiceImpl {
         info!("Forwarding GET request for key: {}", key);
 
         // forward request to another node in cluster
-        let node = self.get_next_node().await?;
+        let node = self.get_next_node(&key).await?;
         let mut client = PandasPouchCacheServiceClient::connect(node).await.map_err(|e| {
             error!("Failed to connect to node: {}", e);
             Status::internal("Failed to connect to node")
@@ -137,7 +175,7 @@ impl PandasPouchCacheService for CacheServiceImpl {
         info!("Forwarding PUT request for key: {}", req.key);
 
         // forward request to another node in cluster
-        let node = self.get_next_node().await?;
+        let node = self.get_next_node(&req.key).await?;
         let mut client = PandasPouchCacheServiceClient::connect(node).await.map_err(|e| {
             error!("Failed to connect to node: {}", e);
             Status::internal("Failed to connect to node")
@@ -155,7 +193,12 @@ impl PandasPouchCacheService for CacheServiceImpl {
 
         // add joining node to cluster
         let mut nodes = self.nodes.lock().await;
-        nodes.push(node_info.expect("NodeInfo should not be None"));
+        let mut hash_ring = self.hash_ring.lock().await;
+        if let Some(node) = node_info {
+            nodes.push(node.clone());
+            let ring_node = RingNodeInfo { host: node.host, port: node.port as u16 };
+            hash_ring.add_node(&ring_node);
+        }
 
         Ok(Response::new(JoinClusterResponse {
             success: true,
@@ -169,7 +212,12 @@ impl PandasPouchCacheService for CacheServiceImpl {
 
         // remove the leaving node from cluster
         let mut nodes = self.nodes.lock().await;
-        nodes.retain(|node| node != node_info.as_ref().expect("NodeInfo should not be None"));
+        let mut hash_ring = self.hash_ring.lock().await;
+        if let Some(node) = node_info {
+            nodes.retain(|n| n != &node);
+            let ring_node = RingNodeInfo { host: node.host, port: node.port as u16 };
+            hash_ring.remove_node(&ring_node);
+        }
 
         Ok(Response::new(LeaveClusterResponse {
             success: true,
@@ -178,27 +226,25 @@ impl PandasPouchCacheService for CacheServiceImpl {
 }
 
 impl CacheServiceImpl {
-    async fn get_next_node(&self) -> Result<String, Status> {
-        let nodes = self.nodes.lock().await;
-        if nodes.is_empty() {
-            return Err(Status::internal("No nodes available in the cluster"));
+    async fn get_next_node(&self, key: &str) -> Result<String, Status> {
+        let hash_ring = self.hash_ring.lock().await;
+        if let Some(node) = hash_ring.get_node(key.to_string()) {
+            Ok(format!("http://{}:{}", node.host, node.port))
+        } else {
+            Err(Status::internal("No nodes available in the cluster"))
         }
-
-        // for now, returning the first node, will integrate with hash_ring
-        Ok(format!("http://{}:{}", nodes[0].host, nodes[0].port))
     }
 }
 
-pub async fn run_server(addr: &str, database_url: &str) -> Result<(), Box<dyn std::error::Error>> {
-    info!("Initializing server with address: {}", addr);
-    let cache = Arc::new(Mutex::new(LRUCache::new(10, None)));          // keeping capacity 10 for now
-    let db: Arc<Database> = Arc::new(Database::new(database_url).await?);
-    let nodes = Arc::new(Mutex::new(Vec::new()));           // list of nodes in the cluster
-
-    db.create_table_if_not_exists().await?;
-    info!("Database table created or verified");
-
-    let service = CacheServiceImpl { cache, db, nodes };
+pub async fn run_server(
+    addr: &str,
+    db:Arc<Database>,
+    cache: Arc<Mutex<LRUCache<String, String>>>,
+    hash_ring: Arc<Mutex<HashRing<RingNodeInfo>>>,
+    curr_node: RingNodeInfo,
+    nodes: Arc<Mutex<Vec<NodeInfo>>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let service = CacheServiceImpl { cache, db, hash_ring, curr_node, nodes };
 
     info!("Starting server on {}", addr);
     Server::builder()

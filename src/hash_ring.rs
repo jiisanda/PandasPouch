@@ -6,12 +6,12 @@ use std::hash::{BuildHasher, BuildHasherDefault, Hasher};
 use twox_hash::XxHash64;
 
 #[derive(Clone, Debug, PartialEq, Hash, Eq)]
-pub struct NodeInfo {
-    pub host: &'static str,
+pub struct RingNodeInfo {
+    pub host: String,
     pub port: u16,
 }
 
-impl fmt::Display for NodeInfo {
+impl fmt::Display for RingNodeInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.host, self.port)
     }
@@ -27,7 +27,7 @@ pub struct HashRing<T, S = XxHash64Hasher> {
     hash_builder: S,
 }
 
-impl<T: ToString + Clone> HashRing<T, XxHash64Hasher> {
+impl<T: ToString + Clone + fmt::Display> HashRing<T, XxHash64Hasher> {
     pub fn new(nodes: Vec<T>, replicas: isize) -> HashRing<T, XxHash64Hasher> {
         HashRing::with_hasher(nodes, replicas, XxHash64Hasher::default())
     }
@@ -35,7 +35,7 @@ impl<T: ToString + Clone> HashRing<T, XxHash64Hasher> {
 
 impl<T, S> HashRing<T, S>
 where
-    T: ToString + Clone,
+    T: ToString + Clone + fmt::Display,
     S: BuildHasher,
 {
     pub fn with_hasher(nodes: Vec<T>, replicas: isize, hash_builder: S) -> HashRing<T, S> {
@@ -55,7 +55,7 @@ where
     // add node
     pub fn add_node(&mut self, node: &T) {
         for i in 0..self.replicas {
-            let key = self.gen_key(format!("{}:{}", node.to_string(), i));
+            let key = self.gen_key(format!("{}:{}", node, i));
             self.ring.insert(key, (*node).clone());
             self.sorted_keys.push(key);
         }
@@ -66,7 +66,7 @@ where
     // delete node
     pub fn remove_node(&mut self, node: &T) {
         for i in 0..self.replicas {
-            let key = self.gen_key(format!("{}:{}", node.to_string(), i));
+            let key = self.gen_key(format!("{}:{}", node, i));
             if !self.ring.contains_key(&key) {
                 return;
             }
