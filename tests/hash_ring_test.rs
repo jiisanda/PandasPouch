@@ -1,27 +1,27 @@
 #[cfg(test)]
 mod test {
     use std::fmt::Display;
-    use pandas_pouch::hash_ring::{HashRing, NodeInfo};
+    use pandas_pouch::hash_ring::{HashRing, RingNodeInfo};
     use std::hash::BuildHasherDefault;
     use std::hash::Hasher;
 
     // Defines a NodeInfo for a localhost address with a given port.
-    fn node(port: u16) -> NodeInfo {
-        NodeInfo {
-            host: "localhost",
+    fn node(port: u16) -> RingNodeInfo {
+        RingNodeInfo {
+            host: "localhost".to_string(),
             port,
         }
     }
 
     #[test]
     fn test_empty_ring() {
-        let hash_ring: HashRing<NodeInfo> = HashRing::new(vec![], 10);
+        let hash_ring: HashRing<RingNodeInfo> = HashRing::new(vec![], 10);
         assert_eq!(None, hash_ring.get_node("hello".to_string()));
     }
 
     #[test]
     fn test_default_nodes() {
-        let mut nodes: Vec<NodeInfo> = Vec::new();
+        let mut nodes: Vec<RingNodeInfo> = Vec::new();
         nodes.push(node(15324));
         nodes.push(node(15325));
         nodes.push(node(15326));
@@ -29,7 +29,7 @@ mod test {
         nodes.push(node(15328));
         nodes.push(node(15329));
 
-        let mut hash_ring: HashRing<NodeInfo> = HashRing::new(nodes, 10);
+        let mut hash_ring: HashRing<RingNodeInfo> = HashRing::new(nodes, 10);
 
         assert_eq!(Some(&node(15324)), hash_ring.get_node("two".to_string()));
         assert_eq!(Some(&node(15325)), hash_ring.get_node("seven".to_string()));
@@ -125,7 +125,7 @@ mod test {
 
     #[test]
     fn test_remove_actual_node() {
-        let mut nodes: Vec<NodeInfo> = Vec::new();
+        let mut nodes: Vec<RingNodeInfo> = Vec::new();
         nodes.push(node(15324));
         nodes.push(node(15325));
         nodes.push(node(15326));
@@ -133,7 +133,7 @@ mod test {
         nodes.push(node(15328));
         nodes.push(node(15329));
 
-        let mut hash_ring: HashRing<NodeInfo> = HashRing::new(nodes, 10);
+        let mut hash_ring: HashRing<RingNodeInfo> = HashRing::new(nodes, 10);
 
         // This should be num nodes * num replicas
         assert_eq!(60, hash_ring.sorted_keys.len());
@@ -148,7 +148,7 @@ mod test {
 
     #[test]
     fn test_remove_non_existent_node() {
-        let mut nodes: Vec<NodeInfo> = Vec::new();
+        let mut nodes: Vec<RingNodeInfo> = Vec::new();
         nodes.push(node(15324));
         nodes.push(node(15325));
         nodes.push(node(15326));
@@ -156,7 +156,7 @@ mod test {
         nodes.push(node(15328));
         nodes.push(node(15329));
 
-        let mut hash_ring: HashRing<NodeInfo> = HashRing::new(nodes, 10);
+        let mut hash_ring: HashRing<RingNodeInfo> = HashRing::new(nodes, 10);
 
         hash_ring.remove_node(&node(15330));
 
@@ -182,7 +182,7 @@ mod test {
 
         type ConstantBuildHasher = BuildHasherDefault<ConstantHasher>;
 
-        let mut nodes: Vec<NodeInfo> = Vec::new();
+        let mut nodes: Vec<RingNodeInfo> = Vec::new();
         nodes.push(node(15324));
         nodes.push(node(15325));
         nodes.push(node(15326));
@@ -190,7 +190,7 @@ mod test {
         nodes.push(node(15328));
         nodes.push(node(15329));
 
-        let hash_ring: HashRing<NodeInfo, ConstantBuildHasher> =
+        let hash_ring: HashRing<RingNodeInfo, ConstantBuildHasher> =
             HashRing::with_hasher(nodes, 10, ConstantBuildHasher::default());
 
         assert_eq!(Some(&node(15329)), hash_ring.get_node("hello".to_string()));
