@@ -32,8 +32,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let nodes = vec![
         // TODO! will update to be user input
-        RingNodeInfo { host: "localhost".to_string(), port: 50051 },
-        RingNodeInfo { host: "localhost".to_string(), port: 50052 },
+        RingNodeInfo { host: "pandas-pouch-app-1".to_string(), port: 50052 },
+        RingNodeInfo { host: "pandas-pouch-app-2".to_string(), port: 50053 },
     ];
     let hash_ring = Arc::new(Mutex::new(HashRing::new(nodes.clone(), 10)));
 
