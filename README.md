@@ -13,6 +13,7 @@ A Distributed Caching Service with Rust 🦀🦀.
 - ✅ API Integration
 - ✅ Docker Setup
 - 🟡 Consistent Hashing
+- 🟡 Service Discovery
 - 🟡 Distributed Cache - Dedicated cache cluster
 
 ## Pre-requisites
